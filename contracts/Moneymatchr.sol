@@ -9,7 +9,7 @@ import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
 import "hardhat/console.sol";
 
 enum MatchState {
-    Sent, Started, Agreeing, Finished, Frozen, Disputed
+    Sent, Started, Voting, Finished, Frozen, Disputed
 }
 
 struct Match {
@@ -44,11 +44,6 @@ contract Moneymatchr is Ownable {
 
     modifier onlyMatch(address _match) {
         require(matchs[_match].initiator == msg.sender || matchs[_match].opponent == msg.sender, "Not in the match");
-        _;
-    }
-
-    modifier startedMatch(address _match) {
-        require(matchs[_match].state == MatchState.Started, "Match did not start");
         _;
     }
 
@@ -124,41 +119,21 @@ contract Moneymatchr is Ownable {
         return true;
     }
 
-    function addWin(address initiator) onlyMatch(initiator) startedMatch(initiator) external returns (bool) {
-        Match storage m = matchs[initiator];
-        require(m.initiator != address(0), "Match does not exist");
-
-        uint limit = (m.maxMatches/2) + 1;
-
-        if (m.initiator == msg.sender) {
-            if (limit == m.initiatorScore + 1) {
-                m.state = MatchState.Agreeing;
-            }
-
-            m.initiatorScore += 1;
-        } else if (m.opponent == msg.sender) {
-            if (limit == m.opponentScore + 1) {
-                m.state = MatchState.Agreeing;
-            }
-
-            m.opponentScore += 1;
-        } else {
-            return false;
-        }
-        
-        return true;
-    }
-
     function agree(address initiator, address on) onlyMatch(initiator) external returns (bool) {
         Match storage m = matchs[initiator];
-        require(m.state == MatchState.Agreeing, "Match state must be in agreeing state to vote");
+        require(m.state == MatchState.Started || m.state == MatchState.Voting, "Match state must be in voting or started state to vote");
+
+        // Set state to voting if first vote
+        if (m.state != MatchState.Voting) {
+            m.state = MatchState.Voting;
+        }
 
         if (m.initiator == msg.sender) {
             m.initiatorAgreement = on;
 
             if (m.opponentAgreement != address(0)) {
                 if (m.opponentAgreement == on) {
-                    win(initiator, on, m.amount);
+                    increaseScore(initiator, on);
                 } else {
                     resetVotes(initiator);
                 }
@@ -168,7 +143,7 @@ contract Moneymatchr is Ownable {
 
             if (m.initiatorAgreement != address(0)) {
                 if (m.initiatorAgreement == on) {
-                    win(initiator, on, m.amount);
+                    increaseScore(initiator, on);
                 } else {
                     resetVotes(initiator);
                 }
@@ -199,10 +174,40 @@ contract Moneymatchr is Ownable {
         m.winner = address(0);
     }
 
+    function increaseScore(address initiator, address user) onlyMatch(initiator) internal returns (bool) {
+        Match storage m = matchs[initiator];
+        require(user != address(0), "You should increase score for an existing user");
+        require(m.state == MatchState.Voting, "Match state must be in voting state to increase score");
+
+        uint limit = (m.maxMatches / 2) + 1;
+
+        if (m.initiator == user) {
+            m.initiatorScore += 1;
+            if (limit == m.initiatorScore) {
+                win(initiator, user, m.amount);
+                return true;
+            }
+        } else if (m.opponent == user) {
+            m.opponentScore += 1;
+            if (limit == m.opponentScore) {
+                win(initiator, user, m.amount);
+                return true;
+            }
+        } else {
+            return false;
+        }
+
+        m.state = MatchState.Started;
+        m.initiatorAgreement = address(0);
+        m.opponentAgreement = address(0);
+        m.attempts = 0;
+        return true;
+    }
+
     function resetVotes(address initiator) internal {
         Match storage m = matchs[initiator];
 
-        m.state = MatchState.Agreeing;
+        m.state = MatchState.Voting;
         m.initiatorAgreement = address(0);
         m.opponentAgreement = address(0);
         m.attempts += 1;
@@ -213,8 +218,8 @@ contract Moneymatchr is Ownable {
     }
 
     function freeze(address initiator) internal {
-        matchs[initiator].frozen = true;
         matchs[initiator].state = MatchState.Frozen;
+        matchs[initiator].frozen = true;
     }
 
     function withdraw(address to, uint amount) internal {
@@ -227,6 +232,9 @@ contract Moneymatchr is Ownable {
         withdraw(winner, amount);
 
         m.state = MatchState.Finished;
+        m.initiatorAgreement = address(0);
+        m.opponentAgreement = address(0);
+        m.attempts = 0;
         m.winner = winner;
         m.amount = 0;
 
