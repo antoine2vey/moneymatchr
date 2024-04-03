@@ -2,12 +2,7 @@ import { expect } from "chai";
 import { ethers } from "hardhat";
 
 enum EnumMatch {
-  Sent,
-  Started,
-  Agreeing,
-  Finished,
-  Frozen,
-  Disputed
+  Sent, Started, Voting, Finished, Frozen, Disputed
 }
 
 const NULL_ADDRESS = "0x0000000000000000000000000000000000000000"
@@ -150,132 +145,26 @@ describe("Moneymatchr", function () {
     })
   })
 
-  describe('add win function', () => {
-    it('adds win for initiator', async () => {
-      const { moneymatchr, initiator, opponent, smashpros } = await loadFixtures()
-
-      await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
-      await moneymatchr.connect(opponent).accept(initiator, MM_PRICE)
-
-      await moneymatchr.connect(initiator).addWin(initiator)
-
-      const match = await moneymatchr.connect(initiator).getMatch(initiator)
-
-      expect(await smashpros.balanceOf(initiator)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
-      expect(await smashpros.balanceOf(opponent)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
-      expect(await smashpros.balanceOf(moneymatchr)).to.equal(MM_PRICE + MM_PRICE)
-      expect(match.initiatorScore).to.equal(1)
-      expect(match.opponentScore).to.equal(0)
-    })
-
-    it('adds win for opponent', async () => {
-      const { moneymatchr, initiator, opponent, smashpros } = await loadFixtures() 
-
-      await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
-
-      await moneymatchr.connect(opponent).accept(initiator, MM_PRICE)
-      await moneymatchr.connect(opponent).addWin(initiator)
-
-      const match = await moneymatchr.connect(opponent).getMatch(initiator)
-
-      expect(await smashpros.balanceOf(initiator)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
-      expect(await smashpros.balanceOf(opponent)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
-      expect(await smashpros.balanceOf(moneymatchr)).to.equal(MM_PRICE + MM_PRICE)
-      expect(match.initiatorScore).to.equal(0)
-      expect(match.opponentScore).to.equal(1)
-    })
-
-    it('triggers vote for initiator', async () => {
-      const { moneymatchr, initiator, opponent, smashpros } = await loadFixtures() 
-
-      await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
-      await moneymatchr.connect(opponent).accept(initiator, MM_PRICE)
-
-      await moneymatchr.connect(initiator).addWin(initiator)
-      await moneymatchr.connect(initiator).addWin(initiator)
-
-      const match = await moneymatchr.connect(initiator).getMatch(initiator)
-
-      expect(await smashpros.balanceOf(initiator)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
-      expect(await smashpros.balanceOf(opponent)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
-      expect(await smashpros.balanceOf(moneymatchr)).to.equal(MM_PRICE * 2)
-      expect(match.initiatorScore).to.equal(2)
-      expect(match.opponentScore).to.equal(0)
-      expect(match.winner).to.equal(NULL_ADDRESS)
-      expect(match.state).to.equal(EnumMatch.Agreeing)
-    })
-
-    it('triggers vote for opponent', async () => {
-      const { moneymatchr, initiator, opponent, smashpros } = await loadFixtures()
-
-      await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
-      await moneymatchr.connect(opponent).accept(initiator, MM_PRICE)
-
-      await moneymatchr.connect(opponent).addWin(initiator)
-      await moneymatchr.connect(initiator).addWin(initiator)
-      await moneymatchr.connect(opponent).addWin(initiator)
-
-      const match = await moneymatchr.connect(opponent).getMatch(initiator)
-
-      expect(await smashpros.balanceOf(initiator)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
-      expect(await smashpros.balanceOf(opponent)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
-      expect(await smashpros.balanceOf(moneymatchr)).to.equal(MM_PRICE * 2)
-      expect(match.initiatorScore).to.equal(1)
-      expect(match.opponentScore).to.equal(2)
-      expect(match.winner).to.equal(NULL_ADDRESS)
-      expect(match.state).to.equal(EnumMatch.Agreeing)
-    })
-
-    it('cannot add win for ended match', async () => {
-      const { moneymatchr, initiator, opponent, smashpros } = await loadFixtures()
-
-      await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
-      await moneymatchr.connect(opponent).accept(initiator, MM_PRICE)
-
-      await moneymatchr.connect(opponent).addWin(initiator)
-      await moneymatchr.connect(initiator).addWin(initiator)
-      await moneymatchr.connect(opponent).addWin(initiator)
-
-      try {
-        await moneymatchr.connect(initiator).addWin(initiator)
-      } catch (error: any) {
-        expect(error.message).to.contain('Match did not start')
-      }
-
-      const match = await moneymatchr.connect(opponent).getMatch(initiator)
-
-      expect(await smashpros.balanceOf(initiator)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
-      expect(await smashpros.balanceOf(opponent)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
-      expect(await smashpros.balanceOf(moneymatchr)).to.equal(MM_PRICE * 2)
-      expect(match.initiatorScore).to.equal(1)
-      expect(match.opponentScore).to.equal(2)
-      expect(match.winner).to.equal(NULL_ADDRESS)
-      expect(match.state).to.equal(EnumMatch.Agreeing)
-    })
-  })
-
   describe('agree function', () => {
-    it('should vote for initiator by initiator', async () => {
+    it('initiator should agree to vote for initiator', async () => {
       const { moneymatchr, initiator, opponent, smashpros } = await loadFixtures() 
 
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
       await moneymatchr.connect(opponent).accept(initiator, MM_PRICE)
-
-      await moneymatchr.connect(initiator).addWin(initiator)
-      await moneymatchr.connect(initiator).addWin(initiator)
 
       await moneymatchr.connect(initiator).agree(initiator, initiator)
+
       const match = await moneymatchr.connect(initiator).getMatch(initiator)
 
       expect(await smashpros.balanceOf(initiator)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
       expect(await smashpros.balanceOf(opponent)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
       expect(await smashpros.balanceOf(moneymatchr)).to.equal(MM_PRICE * 2)
-      expect(match.initiatorScore).to.equal(2)
+      expect(match.initiatorScore).to.equal(0)
       expect(match.opponentScore).to.equal(0)
       expect(match.winner).to.equal(NULL_ADDRESS)
-      expect(match.state).to.equal(EnumMatch.Agreeing)
-      expect(match.initiatorAgreement).to.equal(initiator);
-      expect(match.opponentAgreement).to.equal(NULL_ADDRESS);
+      expect(match.state).to.equal(EnumMatch.Voting)
+      expect(match.initiatorAgreement).to.equal(initiator)
+      expect(match.opponentAgreement).to.equal(NULL_ADDRESS)
     })
 
     it('should vote for initiator by opponent', async () => {
@@ -284,31 +173,117 @@ describe("Moneymatchr", function () {
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
       await moneymatchr.connect(opponent).accept(initiator, MM_PRICE)
 
-      await moneymatchr.connect(initiator).addWin(initiator)
-      await moneymatchr.connect(initiator).addWin(initiator)
-
       await moneymatchr.connect(opponent).agree(initiator, initiator)
+
       const match = await moneymatchr.connect(initiator).getMatch(initiator)
 
       expect(await smashpros.balanceOf(initiator)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
       expect(await smashpros.balanceOf(opponent)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
       expect(await smashpros.balanceOf(moneymatchr)).to.equal(MM_PRICE * 2)
-      expect(match.initiatorScore).to.equal(2)
+      expect(match.initiatorScore).to.equal(0)
       expect(match.opponentScore).to.equal(0)
       expect(match.winner).to.equal(NULL_ADDRESS)
-      expect(match.state).to.equal(EnumMatch.Agreeing)
-      expect(match.initiatorAgreement).to.equal(NULL_ADDRESS);
-      expect(match.opponentAgreement).to.equal(initiator);
+      expect(match.state).to.equal(EnumMatch.Voting)
+      expect(match.initiatorAgreement).to.equal(NULL_ADDRESS)
+      expect(match.opponentAgreement).to.equal(initiator)
     })
 
-    it('should agree if both votes are the same and distribute rewards', async () => {
+    it('initiator should agree to vote for opponent', async () => {
       const { moneymatchr, initiator, opponent, smashpros } = await loadFixtures() 
 
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
       await moneymatchr.connect(opponent).accept(initiator, MM_PRICE)
 
-      await moneymatchr.connect(initiator).addWin(initiator)
-      await moneymatchr.connect(initiator).addWin(initiator)
+      await moneymatchr.connect(initiator).agree(initiator, opponent)
+
+      const match = await moneymatchr.connect(initiator).getMatch(initiator)
+
+      expect(await smashpros.balanceOf(initiator)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
+      expect(await smashpros.balanceOf(opponent)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
+      expect(await smashpros.balanceOf(moneymatchr)).to.equal(MM_PRICE * 2)
+      expect(match.initiatorScore).to.equal(0)
+      expect(match.opponentScore).to.equal(0)
+      expect(match.winner).to.equal(NULL_ADDRESS)
+      expect(match.state).to.equal(EnumMatch.Voting)
+      expect(match.initiatorAgreement).to.equal(opponent)
+      expect(match.opponentAgreement).to.equal(NULL_ADDRESS)
+    })
+
+    it('should vote for opponent by opponent', async () => {
+      const { moneymatchr, initiator, opponent, smashpros } = await loadFixtures() 
+
+      await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
+      await moneymatchr.connect(opponent).accept(initiator, MM_PRICE)
+
+      await moneymatchr.connect(opponent).agree(initiator, opponent)
+
+      const match = await moneymatchr.connect(initiator).getMatch(initiator)
+
+      expect(await smashpros.balanceOf(initiator)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
+      expect(await smashpros.balanceOf(opponent)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
+      expect(await smashpros.balanceOf(moneymatchr)).to.equal(MM_PRICE * 2)
+      expect(match.initiatorScore).to.equal(0)
+      expect(match.opponentScore).to.equal(0)
+      expect(match.winner).to.equal(NULL_ADDRESS)
+      expect(match.state).to.equal(EnumMatch.Voting)
+      expect(match.initiatorAgreement).to.equal(NULL_ADDRESS)
+      expect(match.opponentAgreement).to.equal(opponent)
+    })
+
+    it('should increment win counter for initiator if both agrees', async () => {
+      const { moneymatchr, initiator, opponent, smashpros } = await loadFixtures() 
+
+      await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
+      await moneymatchr.connect(opponent).accept(initiator, MM_PRICE)
+
+      await moneymatchr.connect(initiator).agree(initiator, initiator)
+      await moneymatchr.connect(opponent).agree(initiator, initiator)
+
+      const match = await moneymatchr.connect(initiator).getMatch(initiator)
+
+      expect(await smashpros.balanceOf(initiator)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
+      expect(await smashpros.balanceOf(opponent)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
+      expect(await smashpros.balanceOf(moneymatchr)).to.equal(MM_PRICE * 2)
+      expect(match.initiatorScore).to.equal(1)
+      expect(match.opponentScore).to.equal(0)
+      expect(match.winner).to.equal(NULL_ADDRESS)
+      expect(match.state).to.equal(EnumMatch.Started)
+      expect(match.initiatorAgreement).to.equal(NULL_ADDRESS)
+      expect(match.opponentAgreement).to.equal(NULL_ADDRESS)
+      expect(match.attempts).to.equal(0)
+    })
+
+    it('should increment win counter for opponent if both agrees', async () => {
+      const { moneymatchr, initiator, opponent, smashpros } = await loadFixtures() 
+
+      await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
+      await moneymatchr.connect(opponent).accept(initiator, MM_PRICE)
+
+      await moneymatchr.connect(initiator).agree(initiator, opponent)
+      await moneymatchr.connect(opponent).agree(initiator, opponent)
+
+      const match = await moneymatchr.connect(initiator).getMatch(initiator)
+
+      expect(await smashpros.balanceOf(initiator)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
+      expect(await smashpros.balanceOf(opponent)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
+      expect(await smashpros.balanceOf(moneymatchr)).to.equal(MM_PRICE * 2)
+      expect(match.initiatorScore).to.equal(0)
+      expect(match.opponentScore).to.equal(1)
+      expect(match.winner).to.equal(NULL_ADDRESS)
+      expect(match.state).to.equal(EnumMatch.Started)
+      expect(match.initiatorAgreement).to.equal(NULL_ADDRESS)
+      expect(match.opponentAgreement).to.equal(NULL_ADDRESS)
+      expect(match.attempts).to.equal(0)
+    })
+
+    it('should make initiator win and distribute rewards', async () => {
+      const { moneymatchr, initiator, opponent, smashpros } = await loadFixtures() 
+
+      await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
+      await moneymatchr.connect(opponent).accept(initiator, MM_PRICE)
+
+      await moneymatchr.connect(initiator).agree(initiator, initiator)
+      await moneymatchr.connect(opponent).agree(initiator, initiator)
 
       await moneymatchr.connect(initiator).agree(initiator, initiator)
       await moneymatchr.connect(opponent).agree(initiator, initiator)
@@ -318,24 +293,46 @@ describe("Moneymatchr", function () {
       expect(await smashpros.balanceOf(initiator)).to.equal(BASE_MINT_AMOUNT + MM_PRICE)
       expect(await smashpros.balanceOf(opponent)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
       expect(await smashpros.balanceOf(moneymatchr)).to.equal(0)
-
       expect(match.initiatorScore).to.equal(2)
       expect(match.opponentScore).to.equal(0)
       expect(match.winner).to.equal(initiator)
       expect(match.state).to.equal(EnumMatch.Finished)
-      expect(match.initiatorAgreement).to.equal(initiator);
-      expect(match.opponentAgreement).to.equal(initiator);
-      expect(match.attempts).to.equal(0);
+      expect(match.initiatorAgreement).to.equal(NULL_ADDRESS)
+      expect(match.opponentAgreement).to.equal(NULL_ADDRESS)
+      expect(match.attempts).to.equal(0)
     })
 
-    it('should disagree', async () => {
+    it('should make opponent win and distribute rewards', async () => {
       const { moneymatchr, initiator, opponent, smashpros } = await loadFixtures() 
 
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
       await moneymatchr.connect(opponent).accept(initiator, MM_PRICE)
 
-      await moneymatchr.connect(initiator).addWin(initiator)
-      await moneymatchr.connect(initiator).addWin(initiator)
+      await moneymatchr.connect(initiator).agree(initiator, opponent)
+      await moneymatchr.connect(opponent).agree(initiator, opponent)
+
+      await moneymatchr.connect(initiator).agree(initiator, opponent)
+      await moneymatchr.connect(opponent).agree(initiator, opponent)
+
+      const match = await moneymatchr.connect(initiator).getMatch(initiator)
+
+      expect(await smashpros.balanceOf(initiator)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
+      expect(await smashpros.balanceOf(opponent)).to.equal(BASE_MINT_AMOUNT + MM_PRICE)
+      expect(await smashpros.balanceOf(moneymatchr)).to.equal(0)
+      expect(match.initiatorScore).to.equal(0)
+      expect(match.opponentScore).to.equal(2)
+      expect(match.winner).to.equal(opponent)
+      expect(match.state).to.equal(EnumMatch.Finished)
+      expect(match.initiatorAgreement).to.equal(NULL_ADDRESS)
+      expect(match.opponentAgreement).to.equal(NULL_ADDRESS)
+      expect(match.attempts).to.equal(0)
+    })
+
+    it('should increase attempts if users disagree on round winner', async () => {
+      const { moneymatchr, initiator, opponent, smashpros } = await loadFixtures() 
+
+      await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
+      await moneymatchr.connect(opponent).accept(initiator, MM_PRICE)
 
       await moneymatchr.connect(initiator).agree(initiator, initiator)
       await moneymatchr.connect(opponent).agree(initiator, opponent)
@@ -345,23 +342,20 @@ describe("Moneymatchr", function () {
       expect(await smashpros.balanceOf(initiator)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
       expect(await smashpros.balanceOf(opponent)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
       expect(await smashpros.balanceOf(moneymatchr)).to.equal(MM_PRICE * 2)
-      expect(match.initiatorScore).to.equal(2)
+      expect(match.initiatorScore).to.equal(0)
       expect(match.opponentScore).to.equal(0)
       expect(match.winner).to.equal(NULL_ADDRESS)
-      expect(match.state).to.equal(EnumMatch.Agreeing)
-      expect(match.initiatorAgreement).to.equal(NULL_ADDRESS);
-      expect(match.opponentAgreement).to.equal(NULL_ADDRESS);
+      expect(match.state).to.equal(EnumMatch.Voting)
+      expect(match.initiatorAgreement).to.equal(NULL_ADDRESS)
+      expect(match.opponentAgreement).to.equal(NULL_ADDRESS)
       expect(match.attempts).to.equal(1);
     })
 
-    it('should freeze match if too much attempts', async () => {
+    it('should freeze the match if user disagreed in maxAgreementAttempts times in a row', async () => {
       const { moneymatchr, initiator, opponent, smashpros } = await loadFixtures() 
 
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
       await moneymatchr.connect(opponent).accept(initiator, MM_PRICE)
-
-      await moneymatchr.connect(initiator).addWin(initiator)
-      await moneymatchr.connect(initiator).addWin(initiator)
 
       await moneymatchr.connect(initiator).agree(initiator, initiator)
       await moneymatchr.connect(opponent).agree(initiator, opponent)
@@ -377,14 +371,44 @@ describe("Moneymatchr", function () {
       expect(await smashpros.balanceOf(initiator)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
       expect(await smashpros.balanceOf(opponent)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
       expect(await smashpros.balanceOf(moneymatchr)).to.equal(MM_PRICE * 2)
-      expect(match.initiatorScore).to.equal(2)
+      expect(match.initiatorScore).to.equal(0)
       expect(match.opponentScore).to.equal(0)
       expect(match.winner).to.equal(NULL_ADDRESS)
       expect(match.state).to.equal(EnumMatch.Frozen)
+      expect(match.frozen).to.equal(true)
       expect(match.initiatorAgreement).to.equal(NULL_ADDRESS)
       expect(match.opponentAgreement).to.equal(NULL_ADDRESS)
       expect(match.attempts).to.equal(3)
-      expect(match.frozen).to.equal(true)
+    })
+
+    it('should not freeze match and reset attempts', async () => {
+      const { moneymatchr, initiator, opponent, smashpros } = await loadFixtures() 
+
+      await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
+      await moneymatchr.connect(opponent).accept(initiator, MM_PRICE)
+
+      await moneymatchr.connect(initiator).agree(initiator, initiator)
+      await moneymatchr.connect(opponent).agree(initiator, opponent)
+
+      await moneymatchr.connect(initiator).agree(initiator, initiator)
+      await moneymatchr.connect(opponent).agree(initiator, opponent)
+
+      await moneymatchr.connect(initiator).agree(initiator, initiator)
+      await moneymatchr.connect(opponent).agree(initiator, initiator)
+
+      const match = await moneymatchr.connect(initiator).getMatch(initiator)
+
+      expect(await smashpros.balanceOf(initiator)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
+      expect(await smashpros.balanceOf(opponent)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
+      expect(await smashpros.balanceOf(moneymatchr)).to.equal(MM_PRICE * 2)
+      expect(match.initiatorScore).to.equal(1)
+      expect(match.opponentScore).to.equal(0)
+      expect(match.winner).to.equal(NULL_ADDRESS)
+      expect(match.state).to.equal(EnumMatch.Started)
+      expect(match.frozen).to.equal(false)
+      expect(match.initiatorAgreement).to.equal(NULL_ADDRESS)
+      expect(match.opponentAgreement).to.equal(NULL_ADDRESS)
+      expect(match.attempts).to.equal(0)
     })
   })
 
@@ -394,9 +418,6 @@ describe("Moneymatchr", function () {
 
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
       await moneymatchr.connect(opponent).accept(initiator, MM_PRICE)
-
-      await moneymatchr.connect(initiator).addWin(initiator)
-      await moneymatchr.connect(initiator).addWin(initiator)
 
       await moneymatchr.connect(initiator).agree(initiator, initiator)
       await moneymatchr.connect(opponent).agree(initiator, opponent)
@@ -418,7 +439,7 @@ describe("Moneymatchr", function () {
       expect(await smashpros.balanceOf(initiator)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
       expect(await smashpros.balanceOf(opponent)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
       expect(await smashpros.balanceOf(moneymatchr)).to.equal(MM_PRICE * 2)
-      expect(match.initiatorScore).to.equal(2)
+      expect(match.initiatorScore).to.equal(0)
       expect(match.opponentScore).to.equal(0)
       expect(match.winner).to.equal(NULL_ADDRESS)
       expect(match.state).to.equal(EnumMatch.Frozen)
@@ -428,14 +449,14 @@ describe("Moneymatchr", function () {
       expect(match.frozen).to.equal(true)
     })
 
-    it('should send funds back to players', async () => {
+    it('should send funds back to players if owner is signer', async () => {
       const { moneymatchr, initiator, opponent, smashpros, owner } = await loadFixtures() 
 
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
       await moneymatchr.connect(opponent).accept(initiator, MM_PRICE)
 
-      await moneymatchr.connect(initiator).addWin(initiator)
-      await moneymatchr.connect(initiator).addWin(initiator)
+      await moneymatchr.connect(initiator).agree(initiator, initiator)
+      await moneymatchr.connect(opponent).agree(initiator, initiator)
 
       await moneymatchr.connect(initiator).agree(initiator, initiator)
       await moneymatchr.connect(opponent).agree(initiator, opponent)
@@ -453,7 +474,7 @@ describe("Moneymatchr", function () {
       expect(await smashpros.balanceOf(initiator)).to.equal(BASE_MINT_AMOUNT)
       expect(await smashpros.balanceOf(opponent)).to.equal(BASE_MINT_AMOUNT)
       expect(await smashpros.balanceOf(moneymatchr)).to.equal(0)
-      expect(match.initiatorScore).to.equal(2)
+      expect(match.initiatorScore).to.equal(1)
       expect(match.opponentScore).to.equal(0)
       expect(match.winner).to.equal(NULL_ADDRESS)
       expect(match.state).to.equal(EnumMatch.Disputed)
