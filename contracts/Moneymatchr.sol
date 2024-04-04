@@ -5,6 +5,7 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
+import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 
 import "hardhat/console.sol";
 
@@ -32,14 +33,17 @@ struct Match {
 }
 
 
-contract Moneymatchr is Ownable {
-    uint public immutable maxAgreementAttempts = 3;
+contract Moneymatchr is Ownable, AccessControl {
     ERC20 public immutable Smashpros;
     mapping (address => Match) matchs;
+    uint public immutable maxAgreementAttempts = 3;
+    bytes32 public constant MATCH_MODERATOR = keccak256("MATCH_MODERATOR");
 
     constructor(address initialOwner, address _Smashpros) Ownable(initialOwner) {
         require(_Smashpros != address(0), "Needs token address");
         Smashpros = ERC20(_Smashpros);
+
+       _grantRole(MATCH_MODERATOR, msg.sender);
     }
 
     modifier onlyMatch(address _match) {
@@ -155,7 +159,7 @@ contract Moneymatchr is Ownable {
         return true;
     }
 
-    function emergencyWithdraw(address initiator) external onlyOwner {
+    function emergencyWithdraw(address initiator) external onlyRole(MATCH_MODERATOR) {
         require(initiator != address(0), "Need a match to emergency withdraw from");
 
         Match storage m = matchs[initiator];

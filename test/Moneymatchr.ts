@@ -60,6 +60,13 @@ describe("Moneymatchr", function () {
         expect(e.message).to.contain("OwnableInvalidOwner"); 
       }
     });
+
+    it('should grand moderator role to owner', async () => {
+      const { moneymatchr, owner } = await loadFixtures()
+
+      const moderatorRole = await moneymatchr.MATCH_MODERATOR()
+      expect(await moneymatchr.hasRole(moderatorRole, owner)).to.equal(true);
+    })
   })
 
   describe('start function', () => {
@@ -413,7 +420,7 @@ describe("Moneymatchr", function () {
   })
 
   describe('emergencyWithdraw function', () => {
-    it('should only be called by owner', async () => {
+    it('should only be called by moderator', async () => {
       const { moneymatchr, initiator, opponent, smashpros } = await loadFixtures() 
 
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
@@ -431,7 +438,7 @@ describe("Moneymatchr", function () {
       try {
         await moneymatchr.connect(initiator).emergencyWithdraw(initiator)
       } catch (error: any) {
-        expect(error.message).to.contain('OwnableUnauthorizedAccount')
+        expect(error.message).to.contain('AccessControlUnauthorizedAccount')
       }
 
       const match = await moneymatchr.connect(initiator).getMatch(initiator)
