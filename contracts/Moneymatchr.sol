@@ -33,13 +33,12 @@ struct Match {
 }
 
 interface IMoneymatchr {
-    event Sent(bytes32 indexed _id, uint amount);
-    event Start(bytes32 indexed _id);
-    event Accepted(address indexed _id, address _from);
-    event Declined(bytes32 indexed _id, address _from);
-    event Agreed(bytes32 indexed _id, address _for);
+    event Send(bytes32 indexed _id, uint amount);
+    event Accept(bytes32 indexed _id, address _from);
+    event Decline(bytes32 indexed _id, address _from);
+    event Agree(bytes32 indexed _id, address _from, address _for);
     event Win(bytes32 indexed _id, address _winner);
-    event Freeze(bytes32 indexed _id, address _by);
+    event Freeze(bytes32 indexed _id);
 
     function start(address opponent, uint amount, uint maxMatches) external returns (bool);
     function accept(bytes32 id, uint amount) external returns(bool);
@@ -107,7 +106,7 @@ contract Moneymatchr is Ownable, AccessControl, IMoneymatchr {
             amount
         );
 
-        emit Sent(id, amount);
+        emit Send(id, amount);
 
         return true;
     }
@@ -129,6 +128,8 @@ contract Moneymatchr is Ownable, AccessControl, IMoneymatchr {
         m.amount += amount;
         m.state = MatchState.Started;
 
+        emit Accept(id, msg.sender);
+
         return true;
     }
 
@@ -140,6 +141,8 @@ contract Moneymatchr is Ownable, AccessControl, IMoneymatchr {
 
         withdraw(m.initiator, m.amount);
         delete matchs[id];
+
+        emit Decline(id, msg.sender);
 
         return true;
     }
@@ -156,6 +159,7 @@ contract Moneymatchr is Ownable, AccessControl, IMoneymatchr {
 
         if (m.initiator == msg.sender) {
             m.initiatorAgreement = on;
+            emit Agree(id, msg.sender, on);
 
             if (m.opponentAgreement != address(0)) {
                 if (m.opponentAgreement == on) {
@@ -166,6 +170,7 @@ contract Moneymatchr is Ownable, AccessControl, IMoneymatchr {
             }
         } else if (m.opponent == msg.sender) {
             m.opponentAgreement = on;
+            emit Agree(id, msg.sender, on);
 
             if (m.initiatorAgreement != address(0)) {
                 if (m.initiatorAgreement == on) {
@@ -181,7 +186,7 @@ contract Moneymatchr is Ownable, AccessControl, IMoneymatchr {
         return true;
     }
 
-    function emergencyWithdraw(bytes32 id) matchExists(id) external onlyRole(MATCH_MODERATOR) {
+    function emergencyWithdraw(bytes32 id) matchExists(id) onlyRole(MATCH_MODERATOR) external {
         Match storage m = matchs[id];
         
         require(m.attempts <= maxAgreementAttempts, "Users can still try to have a consensus");
@@ -226,6 +231,7 @@ contract Moneymatchr is Ownable, AccessControl, IMoneymatchr {
         m.initiatorAgreement = address(0);
         m.opponentAgreement = address(0);
         m.attempts = 0;
+
         return true;
     }
 
@@ -245,6 +251,8 @@ contract Moneymatchr is Ownable, AccessControl, IMoneymatchr {
     function freeze(bytes32 id) internal {
         matchs[id].state = MatchState.Frozen;
         matchs[id].frozen = true;
+
+        emit Freeze(id);
     }
 
     function withdraw(address to, uint amount) internal {
@@ -262,6 +270,8 @@ contract Moneymatchr is Ownable, AccessControl, IMoneymatchr {
         m.attempts = 0;
         m.winner = winner;
         m.amount = 0;
+
+        emit Win(id, winner);
 
         return true;
     }
