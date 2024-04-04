@@ -32,8 +32,18 @@ struct Match {
     MatchState state;
 }
 
+contract Events {
+    event Sent(address indexed _match, uint amount);
+    event Start(address indexed _match);
+    event Accepted(address indexed _match, address _from);
+    event Declined(address indexed _match, address _from);
+    event Agreed(address indexed _match, address _for);
+    event Win(address indexed _match, address _winner);
+    event Freeze(address indexed _match, address _by);
+}
 
-contract Moneymatchr is Ownable, AccessControl {
+
+contract Moneymatchr is Ownable, AccessControl, Events {
     ERC20 public immutable Smashpros;
     mapping (address => Match) matchs;
     uint public immutable maxAgreementAttempts = 3;
