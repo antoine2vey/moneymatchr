@@ -32,20 +32,26 @@ struct Match {
     MatchState state;
 }
 
-contract Events {
-    event Sent(address indexed _match, uint amount);
-    event Start(address indexed _match);
-    event Accepted(address indexed _match, address _from);
-    event Declined(address indexed _match, address _from);
-    event Agreed(address indexed _match, address _for);
-    event Win(address indexed _match, address _winner);
-    event Freeze(address indexed _match, address _by);
+interface IMoneymatchr {
+    event Sent(bytes32 indexed _id, uint amount);
+    event Start(bytes32 indexed _id);
+    event Accepted(address indexed _id, address _from);
+    event Declined(bytes32 indexed _id, address _from);
+    event Agreed(bytes32 indexed _id, address _for);
+    event Win(bytes32 indexed _id, address _winner);
+    event Freeze(bytes32 indexed _id, address _by);
+
+    function start(address opponent, uint amount, uint maxMatches) external returns (bool);
+    function accept(bytes32 id, uint amount) external returns(bool);
+    function decline(bytes32 id) external returns(bool);
+    function agree(bytes32 id, address on) external returns (bool);
+    function emergencyWithdraw(bytes32 id) external;
 }
 
 
-contract Moneymatchr is Ownable, AccessControl, Events {
+contract Moneymatchr is Ownable, AccessControl, IMoneymatchr {
     ERC20 public immutable Smashpros;
-    mapping (address => Match) matchs;
+    mapping (bytes32 => Match) matchs;
     uint public immutable maxAgreementAttempts = 3;
     bytes32 public constant MATCH_MODERATOR = keccak256("MATCH_MODERATOR");
 
@@ -56,13 +62,18 @@ contract Moneymatchr is Ownable, AccessControl, Events {
        _grantRole(MATCH_MODERATOR, msg.sender);
     }
 
-    modifier onlyMatch(address _match) {
-        require(matchs[_match].initiator == msg.sender || matchs[_match].opponent == msg.sender, "Not in the match");
+    modifier matchExists(bytes32 _id) {
+        require(_id != bytes32(0), "Match id must not be null");
         _;
     }
 
-    function getMatch(address _initiator) external view returns (Match memory) {
-        return matchs[_initiator];
+    modifier onlyMatch(bytes32 _id) {
+        require(matchs[_id].initiator == msg.sender || matchs[_id].opponent == msg.sender, "Not in the match");
+        _;
+    }
+
+    function getMatch(bytes32 id) external view returns (Match memory) {
+        return matchs[id];
     }
 
     function start(address opponent, uint amount, uint maxMatches) external returns (bool) {
@@ -73,7 +84,9 @@ contract Moneymatchr is Ownable, AccessControl, Events {
         require(Smashpros.balanceOf(msg.sender) >= amount, "Not enough SMSH tokens");
         require(Smashpros.allowance(msg.sender, address(this)) >= amount, "Contract not approved to spend tokens");
 
-        matchs[msg.sender] = Match({
+        bytes32 id = keccak256(abi.encodePacked(msg.sender, block.timestamp, opponent, amount));
+
+        matchs[id] = Match({
             initiator: msg.sender,
             opponent: opponent,
             winner: address(0),
@@ -94,17 +107,17 @@ contract Moneymatchr is Ownable, AccessControl, Events {
             amount
         );
 
+        emit Sent(id, amount);
+
         return true;
     }
 
-    function accept(address initiator, uint amount) external returns(bool) {
-        require(initiator != address(0), "Initiator must not be null address");
-        require(initiator != msg.sender, "You cannot accept your own match");
+    function accept(bytes32 id, uint amount) matchExists(id) external returns(bool) {
+        Match storage m = matchs[id];
 
-        Match storage m = matchs[initiator];
-
-        require(m.amount == amount, "Amount should be the same as agreed");
+        require(m.initiator != msg.sender, "You cannot accept your own match");
         require(m.opponent == msg.sender, "Signer must be the opponent");
+        require(m.amount == amount, "Amount should be the same as agreed");
         require(Smashpros.balanceOf(msg.sender) >= amount, "Not enough SMSH tokens");
 
         Smashpros.transferFrom(
@@ -119,22 +132,21 @@ contract Moneymatchr is Ownable, AccessControl, Events {
         return true;
     }
 
-    function decline(address initiator) external returns(bool) {
-        require(initiator != address(0), "Initiator must not be null address");
-        require(initiator != msg.sender, "You cannot refuse your own match"); 
+    function decline(bytes32 id) matchExists(id) external returns(bool) {
+        Match storage m = matchs[id];
 
-        Match storage m = matchs[initiator];
-
+        require(m.initiator != msg.sender, "You cannot refuse your own match"); 
         require(m.opponent == msg.sender, "Signer must be the opponent");
 
-        withdraw(m.initiator,m.amount);
-        delete matchs[initiator];
+        withdraw(m.initiator, m.amount);
+        delete matchs[id];
 
         return true;
     }
 
-    function agree(address initiator, address on) onlyMatch(initiator) external returns (bool) {
-        Match storage m = matchs[initiator];
+    function agree(bytes32 id, address on) matchExists(id) onlyMatch(id) external returns (bool) {
+        Match storage m = matchs[id];
+
         require(m.state == MatchState.Started || m.state == MatchState.Voting, "Match state must be in voting or started state to vote");
 
         // Set state to voting if first vote
@@ -147,9 +159,9 @@ contract Moneymatchr is Ownable, AccessControl, Events {
 
             if (m.opponentAgreement != address(0)) {
                 if (m.opponentAgreement == on) {
-                    increaseScore(initiator, on);
+                    increaseScore(id, on);
                 } else {
-                    resetVotes(initiator);
+                    resetVotes(id);
                 }
             }
         } else if (m.opponent == msg.sender) {
@@ -157,9 +169,9 @@ contract Moneymatchr is Ownable, AccessControl, Events {
 
             if (m.initiatorAgreement != address(0)) {
                 if (m.initiatorAgreement == on) {
-                    increaseScore(initiator, on);
+                    increaseScore(id, on);
                 } else {
-                    resetVotes(initiator);
+                    resetVotes(id);
                 }
             }
         } else {
@@ -169,16 +181,14 @@ contract Moneymatchr is Ownable, AccessControl, Events {
         return true;
     }
 
-    function emergencyWithdraw(address initiator) external onlyRole(MATCH_MODERATOR) {
-        require(initiator != address(0), "Need a match to emergency withdraw from");
-
-        Match storage m = matchs[initiator];
+    function emergencyWithdraw(bytes32 id) matchExists(id) external onlyRole(MATCH_MODERATOR) {
+        Match storage m = matchs[id];
         
         require(m.attempts <= maxAgreementAttempts, "Users can still try to have a consensus");
         require(m.frozen == true, "Match needs to be frozen to withdraw funds");
         require(m.state == MatchState.Frozen, "Match needs to be frozen to withdraw funds");
 
-        uint amountToSend = matchs[initiator].amount / 2;
+        uint amountToSend = matchs[id].amount / 2;
         withdraw(m.initiator, amountToSend);
         withdraw(m.opponent, amountToSend);
 
@@ -188,8 +198,9 @@ contract Moneymatchr is Ownable, AccessControl, Events {
         m.winner = address(0);
     }
 
-    function increaseScore(address initiator, address user) onlyMatch(initiator) internal returns (bool) {
-        Match storage m = matchs[initiator];
+    function increaseScore(bytes32 id, address user) onlyMatch(id) internal returns (bool) {
+        Match storage m = matchs[id];
+
         require(user != address(0), "You should increase score for an existing user");
         require(m.state == MatchState.Voting, "Match state must be in voting state to increase score");
 
@@ -198,13 +209,13 @@ contract Moneymatchr is Ownable, AccessControl, Events {
         if (m.initiator == user) {
             m.initiatorScore += 1;
             if (limit == m.initiatorScore) {
-                win(initiator, user, m.amount);
+                win(id, user, m.amount);
                 return true;
             }
         } else if (m.opponent == user) {
             m.opponentScore += 1;
             if (limit == m.opponentScore) {
-                win(initiator, user, m.amount);
+                win(id, user, m.amount);
                 return true;
             }
         } else {
@@ -218,8 +229,8 @@ contract Moneymatchr is Ownable, AccessControl, Events {
         return true;
     }
 
-    function resetVotes(address initiator) internal {
-        Match storage m = matchs[initiator];
+    function resetVotes(bytes32 id) internal {
+        Match storage m = matchs[id];
 
         m.state = MatchState.Voting;
         m.initiatorAgreement = address(0);
@@ -227,21 +238,21 @@ contract Moneymatchr is Ownable, AccessControl, Events {
         m.attempts += 1;
 
         if (m.attempts == maxAgreementAttempts) {
-            freeze(initiator);
+            freeze(id);
         }
     }
 
-    function freeze(address initiator) internal {
-        matchs[initiator].state = MatchState.Frozen;
-        matchs[initiator].frozen = true;
+    function freeze(bytes32 id) internal {
+        matchs[id].state = MatchState.Frozen;
+        matchs[id].frozen = true;
     }
 
     function withdraw(address to, uint amount) internal {
         Smashpros.transfer(to, amount);
     }
 
-    function win(address initiator, address winner, uint amount) onlyMatch(initiator) internal returns (bool) {
-        Match storage m = matchs[initiator];
+    function win(bytes32 id, address winner, uint amount) onlyMatch(id) internal returns (bool) {
+        Match storage m = matchs[id];
 
         withdraw(winner, amount);
 

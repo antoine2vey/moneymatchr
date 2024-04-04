@@ -1,5 +1,7 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
+import { ethers, web3 } from "hardhat";
+import { anyUint, anyValue } from "@nomicfoundation/hardhat-chai-matchers/withArgs"
+import { mine } from "@nomicfoundation/hardhat-network-helpers";
 
 enum EnumMatch {
   Sent, Started, Voting, Finished, Frozen, Disputed
@@ -8,6 +10,11 @@ enum EnumMatch {
 const NULL_ADDRESS = "0x0000000000000000000000000000000000000000"
 const MM_PRICE = 1_000
 const BASE_MINT_AMOUNT = MM_PRICE * 1e1
+
+async function getMatchId(initiator: string, opponent: string, amount: number) {
+  const blockTimestamp = (await ethers.provider.getBlock('latest'))?.timestamp;
+  return ethers.solidityPackedKeccak256(['address', 'uint', 'address', 'uint'], [initiator, blockTimestamp, opponent, amount])
+}
 
 async function loadFixtures() {
   const [owner, initiator, opponent] = await ethers.getSigners();
@@ -104,7 +111,9 @@ describe("Moneymatchr", function () {
       const { moneymatchr, initiator, opponent, smashpros } = await loadFixtures()
 
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
-      const match = await moneymatchr.connect(initiator).getMatch(initiator)
+
+      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE);
+      const match = await moneymatchr.connect(initiator).getMatch(id)
 
       expect(await smashpros.balanceOf(initiator)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
       expect(await smashpros.balanceOf(moneymatchr)).to.equal(MM_PRICE)
@@ -121,9 +130,11 @@ describe("Moneymatchr", function () {
       const { moneymatchr, initiator, opponent, smashpros } = await loadFixtures()
 
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
-      await moneymatchr.connect(opponent).accept(initiator, MM_PRICE)
+      
+      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE);
+      await moneymatchr.connect(opponent).accept(id, MM_PRICE)
 
-      const match = await moneymatchr.connect(opponent).getMatch(initiator)
+      const match = await moneymatchr.connect(opponent).getMatch(id)
 
       expect(await smashpros.balanceOf(initiator)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
       expect(await smashpros.balanceOf(opponent)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
@@ -139,8 +150,10 @@ describe("Moneymatchr", function () {
 
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
 
-      await moneymatchr.connect(opponent).decline(initiator)
-      const match = await moneymatchr.connect(opponent).getMatch(initiator)
+      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE);
+
+      await moneymatchr.connect(opponent).decline(id)
+      const match = await moneymatchr.connect(opponent).getMatch(id)
 
       expect(await smashpros.balanceOf(initiator)).to.equal(BASE_MINT_AMOUNT)
       expect(await smashpros.balanceOf(opponent)).to.equal(BASE_MINT_AMOUNT)
@@ -157,11 +170,12 @@ describe("Moneymatchr", function () {
       const { moneymatchr, initiator, opponent, smashpros } = await loadFixtures() 
 
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
-      await moneymatchr.connect(opponent).accept(initiator, MM_PRICE)
+      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE);
+      await moneymatchr.connect(opponent).accept(id, MM_PRICE)
 
-      await moneymatchr.connect(initiator).agree(initiator, initiator)
+      await moneymatchr.connect(initiator).agree(id, initiator)
 
-      const match = await moneymatchr.connect(initiator).getMatch(initiator)
+      const match = await moneymatchr.connect(initiator).getMatch(id)
 
       expect(await smashpros.balanceOf(initiator)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
       expect(await smashpros.balanceOf(opponent)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
@@ -178,11 +192,12 @@ describe("Moneymatchr", function () {
       const { moneymatchr, initiator, opponent, smashpros } = await loadFixtures() 
 
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
-      await moneymatchr.connect(opponent).accept(initiator, MM_PRICE)
+      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE);
+      await moneymatchr.connect(opponent).accept(id, MM_PRICE)
 
-      await moneymatchr.connect(opponent).agree(initiator, initiator)
+      await moneymatchr.connect(opponent).agree(id, initiator)
 
-      const match = await moneymatchr.connect(initiator).getMatch(initiator)
+      const match = await moneymatchr.connect(initiator).getMatch(id)
 
       expect(await smashpros.balanceOf(initiator)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
       expect(await smashpros.balanceOf(opponent)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
@@ -199,11 +214,12 @@ describe("Moneymatchr", function () {
       const { moneymatchr, initiator, opponent, smashpros } = await loadFixtures() 
 
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
-      await moneymatchr.connect(opponent).accept(initiator, MM_PRICE)
+      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE);
+      await moneymatchr.connect(opponent).accept(id, MM_PRICE)
 
-      await moneymatchr.connect(initiator).agree(initiator, opponent)
+      await moneymatchr.connect(initiator).agree(id, opponent)
 
-      const match = await moneymatchr.connect(initiator).getMatch(initiator)
+      const match = await moneymatchr.connect(initiator).getMatch(id)
 
       expect(await smashpros.balanceOf(initiator)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
       expect(await smashpros.balanceOf(opponent)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
@@ -220,11 +236,12 @@ describe("Moneymatchr", function () {
       const { moneymatchr, initiator, opponent, smashpros } = await loadFixtures() 
 
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
-      await moneymatchr.connect(opponent).accept(initiator, MM_PRICE)
+      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE);
+      await moneymatchr.connect(opponent).accept(id, MM_PRICE)
 
-      await moneymatchr.connect(opponent).agree(initiator, opponent)
+      await moneymatchr.connect(opponent).agree(id, opponent)
 
-      const match = await moneymatchr.connect(initiator).getMatch(initiator)
+      const match = await moneymatchr.connect(initiator).getMatch(id)
 
       expect(await smashpros.balanceOf(initiator)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
       expect(await smashpros.balanceOf(opponent)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
@@ -241,12 +258,13 @@ describe("Moneymatchr", function () {
       const { moneymatchr, initiator, opponent, smashpros } = await loadFixtures() 
 
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
-      await moneymatchr.connect(opponent).accept(initiator, MM_PRICE)
+      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE);
+      await moneymatchr.connect(opponent).accept(id, MM_PRICE)
 
-      await moneymatchr.connect(initiator).agree(initiator, initiator)
-      await moneymatchr.connect(opponent).agree(initiator, initiator)
+      await moneymatchr.connect(initiator).agree(id, initiator)
+      await moneymatchr.connect(opponent).agree(id, initiator)
 
-      const match = await moneymatchr.connect(initiator).getMatch(initiator)
+      const match = await moneymatchr.connect(initiator).getMatch(id)
 
       expect(await smashpros.balanceOf(initiator)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
       expect(await smashpros.balanceOf(opponent)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
@@ -264,12 +282,13 @@ describe("Moneymatchr", function () {
       const { moneymatchr, initiator, opponent, smashpros } = await loadFixtures() 
 
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
-      await moneymatchr.connect(opponent).accept(initiator, MM_PRICE)
+      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE);
+      await moneymatchr.connect(opponent).accept(id, MM_PRICE)
 
-      await moneymatchr.connect(initiator).agree(initiator, opponent)
-      await moneymatchr.connect(opponent).agree(initiator, opponent)
+      await moneymatchr.connect(initiator).agree(id, opponent)
+      await moneymatchr.connect(opponent).agree(id, opponent)
 
-      const match = await moneymatchr.connect(initiator).getMatch(initiator)
+      const match = await moneymatchr.connect(initiator).getMatch(id)
 
       expect(await smashpros.balanceOf(initiator)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
       expect(await smashpros.balanceOf(opponent)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
@@ -287,15 +306,16 @@ describe("Moneymatchr", function () {
       const { moneymatchr, initiator, opponent, smashpros } = await loadFixtures() 
 
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
-      await moneymatchr.connect(opponent).accept(initiator, MM_PRICE)
+      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE);
+      await moneymatchr.connect(opponent).accept(id, MM_PRICE)
 
-      await moneymatchr.connect(initiator).agree(initiator, initiator)
-      await moneymatchr.connect(opponent).agree(initiator, initiator)
+      await moneymatchr.connect(initiator).agree(id, initiator)
+      await moneymatchr.connect(opponent).agree(id, initiator)
 
-      await moneymatchr.connect(initiator).agree(initiator, initiator)
-      await moneymatchr.connect(opponent).agree(initiator, initiator)
+      await moneymatchr.connect(initiator).agree(id, initiator)
+      await moneymatchr.connect(opponent).agree(id, initiator)
 
-      const match = await moneymatchr.connect(initiator).getMatch(initiator)
+      const match = await moneymatchr.connect(initiator).getMatch(id)
 
       expect(await smashpros.balanceOf(initiator)).to.equal(BASE_MINT_AMOUNT + MM_PRICE)
       expect(await smashpros.balanceOf(opponent)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
@@ -313,15 +333,16 @@ describe("Moneymatchr", function () {
       const { moneymatchr, initiator, opponent, smashpros } = await loadFixtures() 
 
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
-      await moneymatchr.connect(opponent).accept(initiator, MM_PRICE)
+      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE);
+      await moneymatchr.connect(opponent).accept(id, MM_PRICE)
 
-      await moneymatchr.connect(initiator).agree(initiator, opponent)
-      await moneymatchr.connect(opponent).agree(initiator, opponent)
+      await moneymatchr.connect(initiator).agree(id, opponent)
+      await moneymatchr.connect(opponent).agree(id, opponent)
 
-      await moneymatchr.connect(initiator).agree(initiator, opponent)
-      await moneymatchr.connect(opponent).agree(initiator, opponent)
+      await moneymatchr.connect(initiator).agree(id, opponent)
+      await moneymatchr.connect(opponent).agree(id, opponent)
 
-      const match = await moneymatchr.connect(initiator).getMatch(initiator)
+      const match = await moneymatchr.connect(initiator).getMatch(id)
 
       expect(await smashpros.balanceOf(initiator)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
       expect(await smashpros.balanceOf(opponent)).to.equal(BASE_MINT_AMOUNT + MM_PRICE)
@@ -339,12 +360,13 @@ describe("Moneymatchr", function () {
       const { moneymatchr, initiator, opponent, smashpros } = await loadFixtures() 
 
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
-      await moneymatchr.connect(opponent).accept(initiator, MM_PRICE)
+      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE);
+      await moneymatchr.connect(opponent).accept(id, MM_PRICE)
 
-      await moneymatchr.connect(initiator).agree(initiator, initiator)
-      await moneymatchr.connect(opponent).agree(initiator, opponent)
+      await moneymatchr.connect(initiator).agree(id, initiator)
+      await moneymatchr.connect(opponent).agree(id, opponent)
 
-      const match = await moneymatchr.connect(initiator).getMatch(initiator)
+      const match = await moneymatchr.connect(initiator).getMatch(id)
 
       expect(await smashpros.balanceOf(initiator)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
       expect(await smashpros.balanceOf(opponent)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
@@ -362,18 +384,19 @@ describe("Moneymatchr", function () {
       const { moneymatchr, initiator, opponent, smashpros } = await loadFixtures() 
 
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
-      await moneymatchr.connect(opponent).accept(initiator, MM_PRICE)
+      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE);
+      await moneymatchr.connect(opponent).accept(id, MM_PRICE)
 
-      await moneymatchr.connect(initiator).agree(initiator, initiator)
-      await moneymatchr.connect(opponent).agree(initiator, opponent)
+      await moneymatchr.connect(initiator).agree(id, initiator)
+      await moneymatchr.connect(opponent).agree(id, opponent)
 
-      await moneymatchr.connect(initiator).agree(initiator, initiator)
-      await moneymatchr.connect(opponent).agree(initiator, opponent)
+      await moneymatchr.connect(initiator).agree(id, initiator)
+      await moneymatchr.connect(opponent).agree(id, opponent)
 
-      await moneymatchr.connect(initiator).agree(initiator, initiator)
-      await moneymatchr.connect(opponent).agree(initiator, opponent)
+      await moneymatchr.connect(initiator).agree(id, initiator)
+      await moneymatchr.connect(opponent).agree(id, opponent)
 
-      const match = await moneymatchr.connect(initiator).getMatch(initiator)
+      const match = await moneymatchr.connect(initiator).getMatch(id)
 
       expect(await smashpros.balanceOf(initiator)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
       expect(await smashpros.balanceOf(opponent)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
@@ -392,18 +415,19 @@ describe("Moneymatchr", function () {
       const { moneymatchr, initiator, opponent, smashpros } = await loadFixtures() 
 
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
-      await moneymatchr.connect(opponent).accept(initiator, MM_PRICE)
+      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE);
+      await moneymatchr.connect(opponent).accept(id, MM_PRICE)
 
-      await moneymatchr.connect(initiator).agree(initiator, initiator)
-      await moneymatchr.connect(opponent).agree(initiator, opponent)
+      await moneymatchr.connect(initiator).agree(id, initiator)
+      await moneymatchr.connect(opponent).agree(id, opponent)
 
-      await moneymatchr.connect(initiator).agree(initiator, initiator)
-      await moneymatchr.connect(opponent).agree(initiator, opponent)
+      await moneymatchr.connect(initiator).agree(id, initiator)
+      await moneymatchr.connect(opponent).agree(id, opponent)
 
-      await moneymatchr.connect(initiator).agree(initiator, initiator)
-      await moneymatchr.connect(opponent).agree(initiator, initiator)
+      await moneymatchr.connect(initiator).agree(id, initiator)
+      await moneymatchr.connect(opponent).agree(id, initiator)
 
-      const match = await moneymatchr.connect(initiator).getMatch(initiator)
+      const match = await moneymatchr.connect(initiator).getMatch(id)
 
       expect(await smashpros.balanceOf(initiator)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
       expect(await smashpros.balanceOf(opponent)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
@@ -424,24 +448,25 @@ describe("Moneymatchr", function () {
       const { moneymatchr, initiator, opponent, smashpros } = await loadFixtures() 
 
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
-      await moneymatchr.connect(opponent).accept(initiator, MM_PRICE)
+      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE);
+      await moneymatchr.connect(opponent).accept(id, MM_PRICE)
 
-      await moneymatchr.connect(initiator).agree(initiator, initiator)
-      await moneymatchr.connect(opponent).agree(initiator, opponent)
+      await moneymatchr.connect(initiator).agree(id, initiator)
+      await moneymatchr.connect(opponent).agree(id, opponent)
 
-      await moneymatchr.connect(initiator).agree(initiator, initiator)
-      await moneymatchr.connect(opponent).agree(initiator, opponent)
+      await moneymatchr.connect(initiator).agree(id, initiator)
+      await moneymatchr.connect(opponent).agree(id, opponent)
 
-      await moneymatchr.connect(initiator).agree(initiator, initiator)
-      await moneymatchr.connect(opponent).agree(initiator, opponent)
+      await moneymatchr.connect(initiator).agree(id, initiator)
+      await moneymatchr.connect(opponent).agree(id, opponent)
 
       try {
-        await moneymatchr.connect(initiator).emergencyWithdraw(initiator)
+        await moneymatchr.connect(initiator).emergencyWithdraw(id)
       } catch (error: any) {
         expect(error.message).to.contain('AccessControlUnauthorizedAccount')
       }
 
-      const match = await moneymatchr.connect(initiator).getMatch(initiator)
+      const match = await moneymatchr.connect(initiator).getMatch(id)
 
       expect(await smashpros.balanceOf(initiator)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
       expect(await smashpros.balanceOf(opponent)).to.equal(BASE_MINT_AMOUNT - MM_PRICE)
@@ -460,23 +485,24 @@ describe("Moneymatchr", function () {
       const { moneymatchr, initiator, opponent, smashpros, owner } = await loadFixtures() 
 
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
-      await moneymatchr.connect(opponent).accept(initiator, MM_PRICE)
+      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE);
+      await moneymatchr.connect(opponent).accept(id, MM_PRICE)
 
-      await moneymatchr.connect(initiator).agree(initiator, initiator)
-      await moneymatchr.connect(opponent).agree(initiator, initiator)
+      await moneymatchr.connect(initiator).agree(id, initiator)
+      await moneymatchr.connect(opponent).agree(id, initiator)
 
-      await moneymatchr.connect(initiator).agree(initiator, initiator)
-      await moneymatchr.connect(opponent).agree(initiator, opponent)
+      await moneymatchr.connect(initiator).agree(id, initiator)
+      await moneymatchr.connect(opponent).agree(id, opponent)
 
-      await moneymatchr.connect(initiator).agree(initiator, initiator)
-      await moneymatchr.connect(opponent).agree(initiator, opponent)
+      await moneymatchr.connect(initiator).agree(id, initiator)
+      await moneymatchr.connect(opponent).agree(id, opponent)
 
-      await moneymatchr.connect(initiator).agree(initiator, initiator)
-      await moneymatchr.connect(opponent).agree(initiator, opponent)
+      await moneymatchr.connect(initiator).agree(id, initiator)
+      await moneymatchr.connect(opponent).agree(id, opponent)
 
-      await moneymatchr.connect(owner).emergencyWithdraw(initiator)
+      await moneymatchr.connect(owner).emergencyWithdraw(id)
 
-      const match = await moneymatchr.connect(initiator).getMatch(initiator)
+      const match = await moneymatchr.connect(initiator).getMatch(id)
 
       expect(await smashpros.balanceOf(initiator)).to.equal(BASE_MINT_AMOUNT)
       expect(await smashpros.balanceOf(opponent)).to.equal(BASE_MINT_AMOUNT)
