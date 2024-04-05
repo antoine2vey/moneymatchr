@@ -9,6 +9,7 @@ enum EnumMatch {
 const NULL_ADDRESS = "0x0000000000000000000000000000000000000000"
 const MM_PRICE = 1_000
 const BASE_MINT_AMOUNT = MM_PRICE * 1e1
+const INVALID_KECCAK256 = ethers.solidityPackedKeccak256(["string"], ["INVALID_KECCAK256"])
 
 async function getMatchId(initiator: string, opponent: string, amount: number) {
   const blockTimestamp = await ethers.provider.getBlock('latest')
@@ -16,13 +17,13 @@ async function getMatchId(initiator: string, opponent: string, amount: number) {
 }
 
 async function loadFixtures() {
-  const [owner, initiator, opponent] = await ethers.getSigners()
+  const [owner, initiator, opponent, random] = await ethers.getSigners()
   const moneymatchrFactory = await ethers.getContractFactory("Moneymatchr")
   const smashprosFactory = await ethers.getContractFactory("Smashpros")
   const smashpros = await smashprosFactory.deploy(owner)
   const moneymatchr = await moneymatchrFactory.deploy(owner, smashpros)
 
-  await smashpros.mint(opponent, BASE_MINT_AMOUNT)
+  await smashpros.mint(opponent, BASE_MINT_AMOUNT/2)
   await smashpros.mint(initiator, BASE_MINT_AMOUNT)
 
   await smashpros.connect(initiator).approve(moneymatchr, BASE_MINT_AMOUNT)  
@@ -32,6 +33,7 @@ async function loadFixtures() {
     owner,
     initiator,
     opponent,
+    random,
     smashpros,
     moneymatchr,
     smashprosFactory,
@@ -123,6 +125,20 @@ describe("Moneymatchr", function () {
       expect(match.frozen).to.equal(false)
       expect(match.state).to.equal(EnumMatch.Sent)
     })
+
+    it('shouldnt start a match with even maxMatches set', async () => {
+      const { moneymatchr, initiator, opponent } = await loadFixtures()
+
+      await expect(moneymatchr.connect(initiator).start(opponent, MM_PRICE, 2))
+        .to.be.revertedWith('maxMatches must be odd')
+    })
+
+    it('shouldnt start a match with zero or negative amount', async () => {
+      const { moneymatchr, initiator, opponent } = await loadFixtures()
+
+      await expect(moneymatchr.connect(initiator).start(opponent, 0, 3))
+        .to.be.revertedWith('Positive amount is required')
+    })
   })
 
   describe('accept match function', () => {
@@ -141,6 +157,45 @@ describe("Moneymatchr", function () {
 
       const match = await moneymatchr.connect(opponent).getMatch(id)
       expect(match.state).to.equal(EnumMatch.Started)
+    })
+
+    it('shouldnt accept non existing match', async () => {
+      const { moneymatchr, initiator, opponent } = await loadFixtures()
+
+      await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
+
+      await expect(moneymatchr.connect(opponent).accept(INVALID_KECCAK256, MM_PRICE))
+        .to.be.revertedWith('Match must exists')
+    })
+
+    it('shouldnt accept match for yourself', async () => {
+      const { moneymatchr, initiator, opponent } = await loadFixtures()
+
+      await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
+      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE)
+
+      await expect(moneymatchr.connect(initiator).accept(id, MM_PRICE))
+        .to.be.revertedWith('Signer must be the opponent')
+    })
+
+    it('shouldnt accept match if amount isnt the same', async () => {
+      const { moneymatchr, initiator, opponent } = await loadFixtures()
+
+      await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
+      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE)
+
+      await expect(moneymatchr.connect(opponent).accept(id, MM_PRICE + 1))
+        .to.be.revertedWith('Amount should be the same as agreed')
+    })
+
+    it('shouldnt accept match if not enough tokens', async () => {
+      const { moneymatchr, initiator, opponent } = await loadFixtures()
+
+      await moneymatchr.connect(initiator).start(opponent, BASE_MINT_AMOUNT, 3)
+      const id = await getMatchId(initiator.address, opponent.address, BASE_MINT_AMOUNT)
+
+      await expect(moneymatchr.connect(opponent).accept(id, BASE_MINT_AMOUNT))
+        .to.be.revertedWith('Not enough SMSH tokens')
     })
   })
 
@@ -163,6 +218,25 @@ describe("Moneymatchr", function () {
       expect(match.amount).to.equal(0)
       expect(match.initiator).to.equal(NULL_ADDRESS)
       expect(match.opponent).to.equal(NULL_ADDRESS)
+    })
+
+    it('shouldnt decline non existing match', async () => {
+      const { moneymatchr, initiator, opponent } = await loadFixtures()
+
+      await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
+
+      await expect(moneymatchr.connect(opponent).decline(INVALID_KECCAK256))
+        .to.be.revertedWith('Match must exists')
+    })
+
+    it('shouldnt decline match by yourself', async () => {
+      const { moneymatchr, initiator, opponent, smashpros } = await loadFixtures()
+
+      await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
+      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE)
+
+      await expect(moneymatchr.connect(initiator).decline(id))
+        .to.be.revertedWith('Signer must be the opponent')
     })
   })
 
@@ -243,7 +317,7 @@ describe("Moneymatchr", function () {
       expect(match.opponentAgreement).to.equal(opponent)
     })
 
-    it('should increment win counter for initiator if both agrees', async () => {
+    it('should increment win counter for initiator if both agrees (initiator starts vote)', async () => {
       const { moneymatchr, initiator, opponent } = await loadFixtures() 
 
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
@@ -252,6 +326,27 @@ describe("Moneymatchr", function () {
 
       await moneymatchr.connect(initiator).agree(id, initiator)
       await moneymatchr.connect(opponent).agree(id, initiator)
+
+      const match = await moneymatchr.connect(initiator).getMatch(id)
+
+      expect(match.initiatorScore).to.equal(1)
+      expect(match.opponentScore).to.equal(0)
+      expect(match.winner).to.equal(NULL_ADDRESS)
+      expect(match.state).to.equal(EnumMatch.Started)
+      expect(match.initiatorAgreement).to.equal(NULL_ADDRESS)
+      expect(match.opponentAgreement).to.equal(NULL_ADDRESS)
+      expect(match.attempts).to.equal(0)
+    })
+
+    it('should increment win counter for initiator if both agrees (opponent starts vote)', async () => {
+      const { moneymatchr, initiator, opponent } = await loadFixtures() 
+
+      await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
+      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE)
+      await moneymatchr.connect(opponent).accept(id, MM_PRICE)
+
+      await moneymatchr.connect(opponent).agree(id, initiator)
+      await moneymatchr.connect(initiator).agree(id, initiator)
 
       const match = await moneymatchr.connect(initiator).getMatch(id)
 
@@ -343,6 +438,48 @@ describe("Moneymatchr", function () {
       expect(match.attempts).to.equal(0)
     })
 
+    it('should increase attempts if users disagree on round winner (initiator starts vote)', async () => {
+      const { moneymatchr, initiator, opponent } = await loadFixtures() 
+
+      await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
+      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE)
+      await moneymatchr.connect(opponent).accept(id, MM_PRICE)
+
+      await moneymatchr.connect(initiator).agree(id, initiator)
+      await moneymatchr.connect(opponent).agree(id, opponent)
+
+      const match = await moneymatchr.connect(initiator).getMatch(id)
+
+      expect(match.initiatorScore).to.equal(0)
+      expect(match.opponentScore).to.equal(0)
+      expect(match.winner).to.equal(NULL_ADDRESS)
+      expect(match.state).to.equal(EnumMatch.Voting)
+      expect(match.initiatorAgreement).to.equal(NULL_ADDRESS)
+      expect(match.opponentAgreement).to.equal(NULL_ADDRESS)
+      expect(match.attempts).to.equal(1)
+    })
+
+    it('should increase attempts if users disagree on round winner (opponent starts vote)', async () => {
+      const { moneymatchr, initiator, opponent } = await loadFixtures() 
+
+      await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
+      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE)
+      await moneymatchr.connect(opponent).accept(id, MM_PRICE)
+
+      await moneymatchr.connect(opponent).agree(id, opponent)
+      await moneymatchr.connect(initiator).agree(id, initiator)
+
+      const match = await moneymatchr.connect(initiator).getMatch(id)
+
+      expect(match.initiatorScore).to.equal(0)
+      expect(match.opponentScore).to.equal(0)
+      expect(match.winner).to.equal(NULL_ADDRESS)
+      expect(match.state).to.equal(EnumMatch.Voting)
+      expect(match.initiatorAgreement).to.equal(NULL_ADDRESS)
+      expect(match.opponentAgreement).to.equal(NULL_ADDRESS)
+      expect(match.attempts).to.equal(1)
+    })
+
     it('should increase attempts if users disagree on round winner', async () => {
       const { moneymatchr, initiator, opponent } = await loadFixtures() 
 
@@ -419,6 +556,51 @@ describe("Moneymatchr", function () {
       expect(match.opponentAgreement).to.equal(NULL_ADDRESS)
       expect(match.attempts).to.equal(0)
     })
+
+    it('should not agree if an user not in match tries to vote', async () => {
+      const { moneymatchr, initiator, opponent, random } = await loadFixtures() 
+
+      await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
+      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE)
+      await moneymatchr.connect(opponent).accept(id, MM_PRICE)
+
+      await expect(moneymatchr.connect(random).agree(id, opponent))
+        .to.be.revertedWith('Not in the match')
+    })
+
+    it('should not do anything if match does not exists', async () => {
+      const { moneymatchr, initiator, opponent } = await loadFixtures() 
+
+      await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
+      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE)
+      await moneymatchr.connect(opponent).accept(id, MM_PRICE)
+
+      await expect(moneymatchr.connect(initiator).agree(ethers.encodeBytes32String(""), opponent))
+        .to.be.revertedWith('Match id must not be null')
+      await expect(moneymatchr.connect(initiator).agree(INVALID_KECCAK256, opponent))
+        .to.be.revertedWith('Match must exists')
+    })
+
+    it('should not do anything if match isnt started or voting', async () => {
+      const { moneymatchr, initiator, opponent } = await loadFixtures() 
+
+      await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
+      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE)
+
+      await expect(moneymatchr.connect(initiator).agree(id, opponent))
+        .to.be.revertedWith('Match state must be in voting or started state to vote')
+      
+      await moneymatchr.connect(opponent).accept(id, MM_PRICE)
+
+      await moneymatchr.connect(initiator).agree(id, opponent)
+      await moneymatchr.connect(opponent).agree(id, opponent)
+  
+      await moneymatchr.connect(initiator).agree(id, opponent)
+      await moneymatchr.connect(opponent).agree(id, opponent)
+
+      await expect(moneymatchr.connect(opponent).agree(id, opponent))
+        .to.be.revertedWith('Match state must be in voting or started state to vote')
+    })
   })
 
   describe('emergencyWithdraw function', () => {
@@ -489,6 +671,35 @@ describe("Moneymatchr", function () {
       expect(match.opponentAgreement).to.equal(NULL_ADDRESS)
       expect(match.attempts).to.equal(3)
       expect(match.frozen).to.equal(true)
+    })
+
+    it('shouldnt withdraw non existing match', async () => {
+      const { moneymatchr, initiator, opponent, owner } = await loadFixtures()
+
+      await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
+
+      await expect(moneymatchr.connect(owner).emergencyWithdraw(INVALID_KECCAK256))
+        .to.be.revertedWith('Match must exists')
+    })
+
+    it('should not withdraw if users can still have a consensus', async () => {
+      const { moneymatchr, initiator, opponent, smashpros, owner } = await loadFixtures() 
+
+      await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
+      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE)
+      await moneymatchr.connect(opponent).accept(id, MM_PRICE)
+
+      await moneymatchr.connect(initiator).agree(id, initiator)
+      await moneymatchr.connect(opponent).agree(id, initiator)
+
+      await moneymatchr.connect(initiator).agree(id, initiator)
+      await moneymatchr.connect(opponent).agree(id, opponent)
+
+      await moneymatchr.connect(initiator).agree(id, initiator)
+      await moneymatchr.connect(opponent).agree(id, opponent)
+
+      await expect(moneymatchr.connect(owner).emergencyWithdraw(id))
+        .to.be.revertedWith('Users can still try to have a consensus')
     })
   })
 

@@ -11,10 +11,13 @@ contract Smashpros is ERC20, Ownable, ERC20Permit {
         ERC20("Smashpros", "SMSH")
         Ownable(initialOwner)
         ERC20Permit("Smashpros")
-    {
-        mint(initialOwner, 1_000_000_000);
-    }
+    {}
 
+    /** 
+     * @dev Mint tokens
+     * @param to adress to mint tokens to
+     * @param amount number of tokens
+     */
     function mint(address to, uint256 amount) public onlyOwner {
         _mint(to, amount);
     }
