@@ -5,6 +5,7 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
+import "@openzeppelin/contracts/utils/structs/EnumerableMap.sol";
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 
 import "hardhat/console.sol";
@@ -36,10 +37,10 @@ struct Match {
 
 // Basic interface for Moneymatchr
 interface IMoneymatchr {
-    event Send(bytes32 indexed _id, uint amount);
-    event Accept(bytes32 indexed _id, address _from);
-    event Decline(bytes32 indexed _id, address _from);
-    event Agree(bytes32 indexed _id, address _from, address _for);
+    event Send(address indexed _to, bytes32 _id);
+    event Accept(bytes32 indexed _id);
+    event Decline(bytes32 indexed _id);
+    event Agree(bytes32 indexed _id, address indexed _from, address _for);
     event Win(bytes32 indexed _id, address _winner);
     event Freeze(bytes32 indexed _id);
 
@@ -52,10 +53,14 @@ interface IMoneymatchr {
 
 
 contract Moneymatchr is Ownable, AccessControl, IMoneymatchr {
+    using EnumerableMap for EnumerableMap.UintToAddressMap;
+
     // Smashpros or any ERC20 token
     ERC20 public immutable Smashpros;
     // All moneymatches in the contract
     mapping (bytes32 => Match) matchs;
+    // User matches
+    EnumerableMap.UintToAddressMap private map;
     // Max agreement attemps (todo modify it from public functions)
     uint public immutable maxAgreementAttempts = 3;
     // keccak256(MATCH_MODERATOR)
@@ -66,7 +71,7 @@ contract Moneymatchr is Ownable, AccessControl, IMoneymatchr {
         Smashpros = ERC20(_Smashpros);
 
         // Grant role match moderator to deployer
-       _grantRole(MATCH_MODERATOR, msg.sender);
+       _grantRole(MATCH_MODERATOR, initialOwner);
     }
 
     /**
@@ -135,7 +140,7 @@ contract Moneymatchr is Ownable, AccessControl, IMoneymatchr {
             amount
         );
 
-        emit Send(id, amount);
+        emit Send(opponent, id);
 
         return true;
     }
@@ -162,7 +167,7 @@ contract Moneymatchr is Ownable, AccessControl, IMoneymatchr {
         m.amount += amount;
         m.state = MatchState.Started;
 
-        emit Accept(id, msg.sender);
+        emit Accept(id);
 
         return true;
     }
@@ -181,7 +186,7 @@ contract Moneymatchr is Ownable, AccessControl, IMoneymatchr {
         // Delete match from mapping since this match never existed
         delete matchs[id];
 
-        emit Decline(id, msg.sender);
+        emit Decline(id);
 
         return true;
     }
