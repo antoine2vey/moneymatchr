@@ -1,6 +1,6 @@
 import { expect } from "chai"
 import { ethers } from "hardhat"
-import { anyValue } from "@nomicfoundation/hardhat-chai-matchers/withArgs"
+import { anyUint, anyValue } from "@nomicfoundation/hardhat-chai-matchers/withArgs"
 
 enum EnumMatch {
   Sent, Started, Voting, Finished, Frozen, Disputed
@@ -10,11 +10,7 @@ const NULL_ADDRESS = "0x0000000000000000000000000000000000000000"
 const MM_PRICE = 1_000
 const BASE_MINT_AMOUNT = MM_PRICE * 1e1
 const INVALID_KECCAK256 = ethers.solidityPackedKeccak256(["string"], ["INVALID_KECCAK256"])
-
-async function getMatchId(initiator: string, opponent: string, amount: number) {
-  const blockTimestamp = await ethers.provider.getBlock('latest')
-  return ethers.solidityPackedKeccak256(['address', 'uint', 'address', 'uint'], [initiator, blockTimestamp?.timestamp, opponent, amount])
-}
+const STARTING_ID = 1
 
 async function loadFixtures() {
   const [owner, initiator, opponent, random] = await ethers.getSigners()
@@ -109,7 +105,7 @@ describe("Moneymatchr", function () {
           [-MM_PRICE, MM_PRICE]
         )
 
-      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE)
+      const id = STARTING_ID
       const match = await moneymatchr.connect(initiator).getMatch(id)
 
       expect(match.initiator).to.equal(initiator)
@@ -139,6 +135,84 @@ describe("Moneymatchr", function () {
       await expect(moneymatchr.connect(initiator).start(opponent, 0, 3))
         .to.be.revertedWith('Positive amount is required')
     })
+
+    it('should increment match ids', async () => {
+      const { moneymatchr, initiator, opponent, random } = await loadFixtures()
+      
+      await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
+      await moneymatchr.connect(initiator).start(random, MM_PRICE, 3)
+
+      const opponentMatch = await moneymatchr.getMatch(1);
+      const randomMatch = await moneymatchr.getMatch(2);
+
+      expect(opponentMatch.initiator).to.equal(initiator)
+      expect(opponentMatch.opponent).to.equal(opponent)
+      expect(opponentMatch.winner).to.equal(NULL_ADDRESS)
+      expect(opponentMatch.amount).to.equal(MM_PRICE)
+      expect(randomMatch.initiator).to.equal(initiator)
+      expect(randomMatch.opponent).to.equal(random)
+      expect(randomMatch.winner).to.equal(NULL_ADDRESS)
+      expect(randomMatch.amount).to.equal(MM_PRICE)
+    })
+  })
+
+  describe('get matchs', () => {
+    it('should find a match', async () => {
+      const { moneymatchr, initiator, opponent } = await loadFixtures()
+
+      await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
+      const match = await moneymatchr.getMatch(STARTING_ID)
+
+      expect(match.initiator).to.equal(initiator)
+      expect(match.opponent).to.equal(opponent)
+      expect(match.amount).to.equal(MM_PRICE)
+    })
+
+    it('should not find a match', async () => {
+      const { moneymatchr, initiator, opponent } = await loadFixtures()
+
+      await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
+      const match = await moneymatchr.getMatch(1_000)
+
+      expect(match.initiator).to.equal(NULL_ADDRESS)
+      expect(match.opponent).to.equal(NULL_ADDRESS)
+      expect(match.amount).to.equal(0)
+    })
+
+    it('should find all matches for signer', async () => {
+      const { moneymatchr, initiator, opponent, random } = await loadFixtures()
+
+      await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
+      await moneymatchr.connect(initiator).start(random, MM_PRICE, 3)
+
+      const matches = await moneymatchr.connect(initiator).getMatchs()
+
+      expect(matches.length).to.equal(2)
+      expect(matches[0]).to.equal(1)
+      expect(matches[1]).to.equal(2)
+    })
+
+    it('should delete match', async () => {
+      const { moneymatchr, initiator, opponent, random } = await loadFixtures()
+
+      await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
+      await moneymatchr.connect(initiator).start(random, MM_PRICE, 3)
+
+      await moneymatchr.connect(opponent).decline(1);
+      const iMatches = await moneymatchr.connect(initiator).getMatchs()
+      const oMatches = await moneymatchr.connect(opponent).getMatchs()
+      
+      expect(iMatches.length).to.equal(1)
+      expect(oMatches.length).to.equal(0)
+
+      await moneymatchr.connect(random).decline(2);
+
+      const iiMatches = await moneymatchr.connect(initiator).getMatchs()
+      const rMatches = await moneymatchr.connect(opponent).getMatchs()
+
+      expect(iiMatches.length).to.equal(0)
+      expect(rMatches.length).to.equal(0)
+    })
   })
 
   describe('accept match function', () => {
@@ -146,7 +220,7 @@ describe("Moneymatchr", function () {
       const { moneymatchr, initiator, opponent, smashpros } = await loadFixtures()
 
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
-      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE)
+      const id = STARTING_ID
 
       await expect(moneymatchr.connect(opponent).accept(id, MM_PRICE))
         .to.changeTokenBalances(
@@ -172,7 +246,7 @@ describe("Moneymatchr", function () {
       const { moneymatchr, initiator, opponent } = await loadFixtures()
 
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
-      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE)
+      const id = STARTING_ID
 
       await expect(moneymatchr.connect(initiator).accept(id, MM_PRICE))
         .to.be.revertedWith('Signer must be the opponent')
@@ -182,7 +256,7 @@ describe("Moneymatchr", function () {
       const { moneymatchr, initiator, opponent } = await loadFixtures()
 
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
-      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE)
+      const id = STARTING_ID
 
       await expect(moneymatchr.connect(opponent).accept(id, MM_PRICE + 1))
         .to.be.revertedWith('Amount should be the same as agreed')
@@ -192,7 +266,7 @@ describe("Moneymatchr", function () {
       const { moneymatchr, initiator, opponent } = await loadFixtures()
 
       await moneymatchr.connect(initiator).start(opponent, BASE_MINT_AMOUNT, 3)
-      const id = await getMatchId(initiator.address, opponent.address, BASE_MINT_AMOUNT)
+      const id = STARTING_ID
 
       await expect(moneymatchr.connect(opponent).accept(id, BASE_MINT_AMOUNT))
         .to.be.revertedWith('Not enough SMSH tokens')
@@ -204,7 +278,7 @@ describe("Moneymatchr", function () {
       const { moneymatchr, initiator, opponent, smashpros } = await loadFixtures()
 
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
-      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE)
+      const id = STARTING_ID
 
       await expect(moneymatchr.connect(opponent).decline(id))
         .to.changeTokenBalances(
@@ -233,7 +307,7 @@ describe("Moneymatchr", function () {
       const { moneymatchr, initiator, opponent, smashpros } = await loadFixtures()
 
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
-      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE)
+      const id = STARTING_ID
 
       await expect(moneymatchr.connect(initiator).decline(id))
         .to.be.revertedWith('Signer must be the opponent')
@@ -245,7 +319,7 @@ describe("Moneymatchr", function () {
       const { moneymatchr, initiator, opponent } = await loadFixtures() 
 
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
-      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE)
+      const id = STARTING_ID
       await moneymatchr.connect(opponent).accept(id, MM_PRICE)
 
       await moneymatchr.connect(initiator).agree(id, initiator)
@@ -264,7 +338,7 @@ describe("Moneymatchr", function () {
       const { moneymatchr, initiator, opponent } = await loadFixtures() 
 
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
-      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE)
+      const id = STARTING_ID
       await moneymatchr.connect(opponent).accept(id, MM_PRICE)
 
       await moneymatchr.connect(opponent).agree(id, initiator)
@@ -283,7 +357,7 @@ describe("Moneymatchr", function () {
       const { moneymatchr, initiator, opponent } = await loadFixtures() 
 
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
-      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE)
+      const id = STARTING_ID
       await moneymatchr.connect(opponent).accept(id, MM_PRICE)
 
       await moneymatchr.connect(initiator).agree(id, opponent)
@@ -302,7 +376,7 @@ describe("Moneymatchr", function () {
       const { moneymatchr, initiator, opponent } = await loadFixtures() 
 
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
-      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE)
+      const id = STARTING_ID
       await moneymatchr.connect(opponent).accept(id, MM_PRICE)
 
       await moneymatchr.connect(opponent).agree(id, opponent)
@@ -321,7 +395,7 @@ describe("Moneymatchr", function () {
       const { moneymatchr, initiator, opponent } = await loadFixtures() 
 
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
-      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE)
+      const id = STARTING_ID
       await moneymatchr.connect(opponent).accept(id, MM_PRICE)
 
       await moneymatchr.connect(initiator).agree(id, initiator)
@@ -342,7 +416,7 @@ describe("Moneymatchr", function () {
       const { moneymatchr, initiator, opponent } = await loadFixtures() 
 
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
-      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE)
+      const id = STARTING_ID
       await moneymatchr.connect(opponent).accept(id, MM_PRICE)
 
       await moneymatchr.connect(opponent).agree(id, initiator)
@@ -363,7 +437,7 @@ describe("Moneymatchr", function () {
       const { moneymatchr, initiator, opponent } = await loadFixtures() 
 
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
-      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE)
+      const id = STARTING_ID
       await moneymatchr.connect(opponent).accept(id, MM_PRICE)
 
       await moneymatchr.connect(initiator).agree(id, opponent)
@@ -384,7 +458,7 @@ describe("Moneymatchr", function () {
       const { moneymatchr, initiator, opponent, smashpros } = await loadFixtures() 
 
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
-      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE)
+      const id = STARTING_ID
       await moneymatchr.connect(opponent).accept(id, MM_PRICE)
 
       await moneymatchr.connect(initiator).agree(id, initiator)
@@ -413,7 +487,7 @@ describe("Moneymatchr", function () {
       const { moneymatchr, initiator, opponent, smashpros } = await loadFixtures() 
 
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
-      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE)
+      const id = STARTING_ID
       await moneymatchr.connect(opponent).accept(id, MM_PRICE)
 
       await moneymatchr.connect(initiator).agree(id, opponent)
@@ -442,7 +516,7 @@ describe("Moneymatchr", function () {
       const { moneymatchr, initiator, opponent } = await loadFixtures() 
 
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
-      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE)
+      const id = STARTING_ID
       await moneymatchr.connect(opponent).accept(id, MM_PRICE)
 
       await moneymatchr.connect(initiator).agree(id, initiator)
@@ -463,7 +537,7 @@ describe("Moneymatchr", function () {
       const { moneymatchr, initiator, opponent } = await loadFixtures() 
 
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
-      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE)
+      const id = STARTING_ID
       await moneymatchr.connect(opponent).accept(id, MM_PRICE)
 
       await moneymatchr.connect(opponent).agree(id, opponent)
@@ -484,7 +558,7 @@ describe("Moneymatchr", function () {
       const { moneymatchr, initiator, opponent } = await loadFixtures() 
 
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
-      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE)
+      const id = STARTING_ID
       await moneymatchr.connect(opponent).accept(id, MM_PRICE)
 
       await moneymatchr.connect(initiator).agree(id, initiator)
@@ -505,7 +579,7 @@ describe("Moneymatchr", function () {
       const { moneymatchr, initiator, opponent } = await loadFixtures() 
 
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
-      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE)
+      const id = STARTING_ID
       await moneymatchr.connect(opponent).accept(id, MM_PRICE)
 
       await moneymatchr.connect(initiator).agree(id, initiator)
@@ -533,7 +607,7 @@ describe("Moneymatchr", function () {
       const { moneymatchr, initiator, opponent } = await loadFixtures() 
 
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
-      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE)
+      const id = STARTING_ID
       await moneymatchr.connect(opponent).accept(id, MM_PRICE)
 
       await moneymatchr.connect(initiator).agree(id, initiator)
@@ -561,7 +635,7 @@ describe("Moneymatchr", function () {
       const { moneymatchr, initiator, opponent, random } = await loadFixtures() 
 
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
-      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE)
+      const id = STARTING_ID
       await moneymatchr.connect(opponent).accept(id, MM_PRICE)
 
       await expect(moneymatchr.connect(random).agree(id, opponent))
@@ -572,7 +646,7 @@ describe("Moneymatchr", function () {
       const { moneymatchr, initiator, opponent } = await loadFixtures() 
 
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
-      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE)
+      const id = STARTING_ID
       await moneymatchr.connect(opponent).accept(id, MM_PRICE)
 
       await expect(moneymatchr.connect(initiator).agree(ethers.encodeBytes32String(""), opponent))
@@ -585,7 +659,7 @@ describe("Moneymatchr", function () {
       const { moneymatchr, initiator, opponent } = await loadFixtures() 
 
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
-      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE)
+      const id = STARTING_ID
 
       await expect(moneymatchr.connect(initiator).agree(id, opponent))
         .to.be.revertedWith('Match state must be in voting or started state to vote')
@@ -608,7 +682,7 @@ describe("Moneymatchr", function () {
       const { moneymatchr, initiator, opponent } = await loadFixtures() 
 
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
-      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE)
+      const id = STARTING_ID
       await moneymatchr.connect(opponent).accept(id, MM_PRICE)
 
       await moneymatchr.connect(initiator).agree(id, initiator)
@@ -639,7 +713,7 @@ describe("Moneymatchr", function () {
       const { moneymatchr, initiator, opponent, smashpros, owner } = await loadFixtures() 
 
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
-      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE)
+      const id = STARTING_ID
       await moneymatchr.connect(opponent).accept(id, MM_PRICE)
 
       await moneymatchr.connect(initiator).agree(id, initiator)
@@ -686,7 +760,7 @@ describe("Moneymatchr", function () {
       const { moneymatchr, initiator, opponent, smashpros, owner } = await loadFixtures() 
 
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
-      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE)
+      const id = STARTING_ID
       await moneymatchr.connect(opponent).accept(id, MM_PRICE)
 
       await moneymatchr.connect(initiator).agree(id, initiator)
@@ -709,34 +783,34 @@ describe("Moneymatchr", function () {
 
       await expect(moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3))
         .to.emit(moneymatchr, 'Send')
-        .withArgs(anyValue, MM_PRICE)
+        .withArgs(anyValue, anyUint)
     })
 
     it('sends event for match accepted', async () => {
       const { moneymatchr, initiator, opponent } = await loadFixtures()
 
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
-      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE)
+      const id = STARTING_ID
       await expect(moneymatchr.connect(opponent).accept(id, MM_PRICE))
         .to.emit(moneymatchr, 'Accept')
-        .withArgs(anyValue, opponent.address)
+        .withArgs(anyUint)
     })
 
     it('sends event for match declined', async () => {
       const { moneymatchr, initiator, opponent } = await loadFixtures()
 
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
-      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE)
+      const id = STARTING_ID
       await expect(moneymatchr.connect(opponent).decline(id))
         .to.emit(moneymatchr, 'Decline')
-        .withArgs(anyValue, opponent.address)
+        .withArgs(anyUint)
     })
 
     it('sends event for match agreement', async () => {
       const { moneymatchr, initiator, opponent } = await loadFixtures()
 
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
-      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE)
+      const id = STARTING_ID
       await moneymatchr.connect(opponent).accept(id, MM_PRICE)
       
       await expect(moneymatchr.connect(initiator).agree(id, initiator))
@@ -748,7 +822,7 @@ describe("Moneymatchr", function () {
       const { moneymatchr, initiator, opponent } = await loadFixtures()
 
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
-      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE)
+      const id = STARTING_ID
       await moneymatchr.connect(opponent).accept(id, MM_PRICE)
 
       await moneymatchr.connect(initiator).agree(id, opponent)
@@ -767,7 +841,7 @@ describe("Moneymatchr", function () {
     const { moneymatchr, initiator, opponent } = await loadFixtures() 
 
       await moneymatchr.connect(initiator).start(opponent, MM_PRICE, 3)
-      const id = await getMatchId(initiator.address, opponent.address, MM_PRICE)
+      const id = STARTING_ID
       await moneymatchr.connect(opponent).accept(id, MM_PRICE)
 
       await moneymatchr.connect(initiator).agree(id, initiator)

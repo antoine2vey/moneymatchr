@@ -5,9 +5,7 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
-import "@openzeppelin/contracts/utils/structs/EnumerableMap.sol";
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
-
 import "hardhat/console.sol";
 
 // Match state for events
@@ -37,30 +35,30 @@ struct Match {
 
 // Basic interface for Moneymatchr
 interface IMoneymatchr {
-    event Send(address indexed _to, bytes32 _id);
-    event Accept(bytes32 indexed _id);
-    event Decline(bytes32 indexed _id);
-    event Agree(bytes32 indexed _id, address indexed _from, address _for);
-    event Win(bytes32 indexed _id, address _winner);
-    event Freeze(bytes32 indexed _id);
+    event Send(address indexed _to, uint256 _id);
+    event Accept(uint256 indexed _id);
+    event Decline(uint256 indexed _id);
+    event Agree(uint256 indexed _id, address indexed _from, address _for);
+    event Win(uint256 indexed _id, address _winner);
+    event Freeze(uint256 indexed _id);
 
     function start(address opponent, uint amount, uint maxMatches) external returns (bool);
-    function accept(bytes32 id, uint amount) external returns(bool);
-    function decline(bytes32 id) external returns(bool);
-    function agree(bytes32 id, address on) external returns (bool);
-    function emergencyWithdraw(bytes32 id) external;
+    function accept(uint256 id, uint amount) external returns(bool);
+    function decline(uint256 id) external returns(bool);
+    function agree(uint256 id, address on) external returns (bool);
+    function emergencyWithdraw(uint256 id) external;
 }
 
 
 contract Moneymatchr is Ownable, AccessControl, IMoneymatchr {
-    using EnumerableMap for EnumerableMap.UintToAddressMap;
-
     // Smashpros or any ERC20 token
     ERC20 public immutable Smashpros;
     // All moneymatches in the contract
-    mapping (bytes32 => Match) matchs;
-    // User matches
-    EnumerableMap.UintToAddressMap private map;
+    mapping (uint256 => Match) matchs;
+    // Match ids
+    mapping (address => uint256[]) ids;
+    // Match starting id
+    uint256 startingId = 0;
     // Max agreement attemps (todo modify it from public functions)
     uint public immutable maxAgreementAttempts = 3;
     // keccak256(MATCH_MODERATOR)
@@ -78,8 +76,8 @@ contract Moneymatchr is Ownable, AccessControl, IMoneymatchr {
      * @dev Ensure id is not empty and match exists
      * @param _id match id
      */
-    modifier matchExists(bytes32 _id) {
-        require(_id != bytes32(0), "Match id must not be null");
+    modifier matchExists(uint256 _id) {
+        require(_id != uint256(0), "Match id must not be null");
         require(matchs[_id].initiator != address(0) && matchs[_id].opponent != address(0), "Match must exists");
         _;
     }
@@ -88,7 +86,7 @@ contract Moneymatchr is Ownable, AccessControl, IMoneymatchr {
      * @dev Checks if `msg.sender` is in a given match
      * @param _id match id
      */
-    modifier onlyMatch(bytes32 _id) {
+    modifier onlyMatch(uint256 _id) {
         require(matchs[_id].initiator == msg.sender || matchs[_id].opponent == msg.sender, "Not in the match");
         _;
     }
@@ -97,8 +95,15 @@ contract Moneymatchr is Ownable, AccessControl, IMoneymatchr {
      * @dev Returns a match by its id
      * @param id match id
      */
-    function getMatch(bytes32 id) external view returns (Match memory) {
+    function getMatch(uint256 id) external view returns(Match memory) {
         return matchs[id];
+    }
+
+    /**
+     * @dev Get all matches for an user
+     */
+    function getMatchs() external view returns(uint256[] memory) {
+        return ids[msg.sender];
     }
 
     /**
@@ -114,11 +119,10 @@ contract Moneymatchr is Ownable, AccessControl, IMoneymatchr {
         require(amount > 0, "Positive amount is required");
         require(Smashpros.balanceOf(msg.sender) >= amount, "Not enough SMSH tokens");
         require(Smashpros.allowance(msg.sender, address(this)) >= amount, "Contract not approved to spend tokens");
+        
+        startingId++;
 
-        // Create a pseudo-unique id based on block timestamp
-        bytes32 id = keccak256(abi.encodePacked(msg.sender, block.timestamp, opponent, amount));
-
-        matchs[id] = Match({
+        matchs[startingId] = Match({
             initiator: msg.sender,
             opponent: opponent,
             winner: address(0),
@@ -133,6 +137,10 @@ contract Moneymatchr is Ownable, AccessControl, IMoneymatchr {
             state: MatchState.Sent
         });
 
+        // Add references for both users
+        ids[msg.sender].push(startingId);
+        ids[opponent].push(startingId);
+
         // Transfer funds from signer to contract
         Smashpros.transferFrom(
             msg.sender,
@@ -140,7 +148,7 @@ contract Moneymatchr is Ownable, AccessControl, IMoneymatchr {
             amount
         );
 
-        emit Send(opponent, id);
+        emit Send(opponent, startingId);
 
         return true;
     }
@@ -150,7 +158,7 @@ contract Moneymatchr is Ownable, AccessControl, IMoneymatchr {
      * @param id match id
      * @param amount amount of tokens
      */
-    function accept(bytes32 id, uint amount) matchExists(id) external returns(bool) {
+    function accept(uint256 id, uint amount) matchExists(id) external returns(bool) {
         Match storage m = matchs[id];
 
         require(m.opponent == msg.sender, "Signer must be the opponent");
@@ -176,13 +184,16 @@ contract Moneymatchr is Ownable, AccessControl, IMoneymatchr {
      * @dev Declines a match, sends funds back to the match creator
      * @param id match id
      */
-    function decline(bytes32 id) matchExists(id) external returns(bool) {
+    function decline(uint256 id) matchExists(id) external returns(bool) {
         Match storage m = matchs[id];
 
         require(m.opponent == msg.sender, "Signer must be the opponent");
 
         // Sends funds back to initiator
         withdraw(m.initiator, m.amount);
+        // Remove references from ids for both users
+        removeMatchReference(msg.sender, id);
+        removeMatchReference(m.initiator, id);
         // Delete match from mapping since this match never existed
         delete matchs[id];
 
@@ -197,7 +208,7 @@ contract Moneymatchr is Ownable, AccessControl, IMoneymatchr {
      * @param id match id
      * @param on round winner
      */
-    function agree(bytes32 id, address on) matchExists(id) onlyMatch(id) external returns (bool) {
+    function agree(uint256 id, address on) matchExists(id) onlyMatch(id) external returns (bool) {
         Match storage m = matchs[id];
 
         require(m.state == MatchState.Started || m.state == MatchState.Voting, "Match state must be in voting or started state to vote");
@@ -251,7 +262,7 @@ contract Moneymatchr is Ownable, AccessControl, IMoneymatchr {
      * by MATCH_MODERATOR
      * @param id match id
      */
-    function emergencyWithdraw(bytes32 id) onlyRole(MATCH_MODERATOR) matchExists(id) external {
+    function emergencyWithdraw(uint256 id) onlyRole(MATCH_MODERATOR) matchExists(id) external {
         Match storage m = matchs[id];
         
         require(m.attempts >= maxAgreementAttempts, "Users can still try to have a consensus");
@@ -275,7 +286,7 @@ contract Moneymatchr is Ownable, AccessControl, IMoneymatchr {
      * @param id match id
      * @param user user to increase score
      */
-    function increaseScore(bytes32 id, address user) onlyMatch(id) internal returns (bool) {
+    function increaseScore(uint256 id, address user) onlyMatch(id) internal returns (bool) {
         Match storage m = matchs[id];
 
         require(user != address(0), "You should increase score for an existing user");
@@ -315,7 +326,7 @@ contract Moneymatchr is Ownable, AccessControl, IMoneymatchr {
      * @dev Reset match votes and freezes if needed
      * @param id match id
      */
-    function resetVotes(bytes32 id) internal {
+    function resetVotes(uint256 id) internal {
         Match storage m = matchs[id];
 
         m.state = MatchState.Voting;
@@ -333,7 +344,7 @@ contract Moneymatchr is Ownable, AccessControl, IMoneymatchr {
      * Freezes a match
      * @param id match id
      */
-    function freeze(bytes32 id) internal {
+    function freeze(uint256 id) internal {
         matchs[id].state = MatchState.Frozen;
         matchs[id].frozen = true;
 
@@ -355,7 +366,7 @@ contract Moneymatchr is Ownable, AccessControl, IMoneymatchr {
      * @param winner user 
      * @param amount amount of token
      */
-    function win(bytes32 id, address winner, uint amount) onlyMatch(id) internal returns (bool) {
+    function win(uint256 id, address winner, uint amount) onlyMatch(id) internal returns (bool) {
         Match storage m = matchs[id];
 
         withdraw(winner, amount);
@@ -370,5 +381,22 @@ contract Moneymatchr is Ownable, AccessControl, IMoneymatchr {
         emit Win(id, winner);
 
         return true;
+    }
+
+    /**
+     * @dev Sets element with value to the end and pops array
+     * shouldn't iterate that much on array so its fine gas wise
+     * @param _id element to delete
+     */
+    function removeMatchReference(address _address, uint256 _id) internal {
+        require(_address != address(0));
+        require(_id != uint256(0));
+
+        for (uint i = 0; i < ids[_address].length; i++) {
+            if (ids[_address][i] == _id) {
+                ids[_address][i] = ids[_address][ids[_address].length-1];
+                ids[_address].pop();
+            }
+        }
     }
 }
