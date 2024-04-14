@@ -102,8 +102,14 @@ contract Moneymatchr is Ownable, AccessControl, IMoneymatchr {
     /**
      * @dev Get all matches for an user
      */
-    function getMatchs() external view returns(uint256[] memory) {
-        return ids[msg.sender];
+    function getMatchs() external view returns(Match[] memory) {
+        Match[] memory userMatchs = new Match[](ids[msg.sender].length);
+
+        for (uint i = 0; i < ids[msg.sender].length; i++) {
+            userMatchs[i] = this.getMatch(ids[msg.sender][i]);
+        }
+
+        return userMatchs;
     }
 
     /**
