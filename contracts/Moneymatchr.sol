@@ -15,6 +15,8 @@ enum MatchState {
 
 // Match structure for Moneymatchr
 struct Match {
+    uint256 id;
+
     address initiator;
     address opponent;
     address winner;
@@ -129,6 +131,7 @@ contract Moneymatchr is Ownable, AccessControl, IMoneymatchr {
         startingId++;
 
         matchs[startingId] = Match({
+            id: startingId,
             initiator: msg.sender,
             opponent: opponent,
             winner: address(0),

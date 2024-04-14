@@ -189,10 +189,12 @@ describe("Moneymatchr", function () {
 
       expect(matches.length).to.equal(2)
 
+      expect(matches[0].id).to.equal(1)
       expect(matches[0].initiator).to.equal(initiator)
       expect(matches[0].opponent).to.equal(opponent)
       expect(matches[0].amount).to.equal(MM_PRICE)
 
+      expect(matches[1].id).to.equal(2)
       expect(matches[1].initiator).to.equal(initiator)
       expect(matches[1].opponent).to.equal(random)
       expect(matches[1].amount).to.equal(MM_PRICE)
